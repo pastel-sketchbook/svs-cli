@@ -18,11 +18,10 @@ It mirrors the export pipeline of the reference apps
 ## Install
 
 ```sh
-# From the repo root
-task install        # installs `svs` into ~/.cargo/bin
+task install        # builds release and copies `svs` to ~/bin/
 ```
 
-Or build a release binary:
+Or build without installing:
 
 ```sh
 task build          # target/release/svs
@@ -30,7 +29,7 @@ task build          # target/release/svs
 
 ## Requirements
 
-- Rust 1.75+ (stable).
+- Rust 1.95+ (edition 2024).
 - `ffmpeg` on PATH (`brew install ffmpeg`).
 - `pdftoppm` on PATH for PDF input (`brew install poppler` /
   `apt install poppler-utils`).
@@ -45,9 +44,15 @@ svs render deck.pdf
 
 # From a folder of slide images (sorted by filename)
 svs render ./slides --output presentation.mp4 \
-    --voice Kore --transition fade
+    --voice kore --transition fade
 
-# Re-run with cached notes/audio (default), but regenerate audio
+# Resume an interrupted render
+svs render deck.pdf --resume
+
+# Clear cache and start fresh
+svs render deck.pdf --clear
+
+# Re-run with cached notes but regenerate audio
 svs render deck.pdf --regenerate-audio
 ```
 
@@ -58,16 +63,40 @@ svs render deck.pdf --regenerate-audio
 | `--output, -o` | `<stem>.mp4` next to input | Final MP4 path |
 | `--cache-dir` | `<stem>.svs-cache/` | Per-slide notes/audio/segments |
 | `--api-key` | `$GEMINI_API_KEY` | Required |
-| `--voice` | `Zephyr` | One of `Zephyr Puck Charon Kore Fenrir` |
-| `--transition` | `Slide` | One of `none fade slide wipe zoom` |
+| `--voice` | `zephyr` | One of `zephyr puck charon kore fenrir` |
+| `--transition` | `slide` | One of `none fade slide wipe zoom` |
 | `--notes-model` | `gemini-2.5-flash` | Vision model for notes |
 | `--width / --height / --fps` | `1920 / 1080 / 30` | Output video shape |
 | `--gemini-concurrency` | `4` | Max parallel Gemini calls |
 | `--encode-concurrency` | `cores/2` | Max parallel FFmpeg encodes |
 | `--pdf-dpi` | `200` | Used by `pdftoppm` |
 | `--pdf-jpeg-quality` | `85` | 1–100 |
+| `--resume` | — | Resume without prompting |
+| `--clear` | — | Clear cache without prompting |
 | `--regenerate-notes / --regenerate-audio` | off | Bypass cache |
 | `--keep-cache` | off | Keep segment MP4s after assembly |
+
+## Resumable Production
+
+When a cache directory already exists from a previous run, `svs` will
+prompt interactively:
+
+```
+  Existing cache found: deck.svs-cache/
+
+  [r] Resume previous production
+  [c] Clear cache and start fresh
+
+  Choice [r/c] (default: r):
+```
+
+Use `--resume` or `--clear` to skip the prompt in scripts.
+
+## Configuration
+
+Prompts and model names live in [`prompts.ron`](prompts.ron) (embedded at
+compile time). Edit this file to tweak Gemini prompts or switch models
+without changing Rust code.
 
 ## Cache Layout
 
@@ -81,6 +110,18 @@ svs render deck.pdf --regenerate-audio
 
 Notes and audio are reused on subsequent runs to keep iteration cheap
 and Gemini bills small.
+
+## Versioning
+
+```sh
+task version:patch   # 0.1.0 → 0.1.1
+task version:minor   # 0.1.0 → 0.2.0
+task version:major   # 0.1.0 → 1.0.0
+task version:tag     # commit + git tag
+```
+
+VERSION file is the single source of truth; `Cargo.toml` is synced
+automatically.
 
 ## License
 
