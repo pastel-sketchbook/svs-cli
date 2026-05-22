@@ -1,0 +1,82 @@
+version: '3'
+
+# SlideVoice Studio CLI (Rust) — task runner.
+#
+# Headless video production: PDF/images → Gemini notes → Gemini TTS →
+# FFmpeg → narrated MP4. Mirrors the export pipeline of ../fl-svs and
+# ../swift-svs without any UI in the loop.
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list
+
+  fmt:
+    desc: Format Rust code
+    cmds:
+      - cargo fmt --all
+
+  fmt:check:
+    desc: Verify formatting without rewriting
+    cmds:
+      - cargo fmt --all -- --check
+
+  lint:
+    desc: Static analysis with Clippy (warnings denied)
+    cmds:
+      - cargo clippy --all-targets --all-features -- -D warnings
+
+  test:
+    desc: Run unit and integration tests
+    cmds:
+      - cargo test --all-features
+
+  build:
+    desc: Release build of the `svs` binary
+    cmds:
+      - cargo build --release
+
+  build:debug:
+    desc: Debug build of the `svs` binary
+    cmds:
+      - cargo build
+
+  run:
+    desc: Run the CLI in debug mode (forward args after `--`)
+    cmds:
+      - cargo run --quiet -- {{.CLI_ARGS}}
+
+  install:
+    desc: Install the `svs` binary into ~/.cargo/bin
+    cmds:
+      - cargo install --path . --locked
+
+  check:all:
+    desc: Format, lint, and test in one pass
+    cmds:
+      - task: fmt
+      - task: lint
+      - task: test
+
+  clean:
+    desc: Remove build artifacts
+    cmds:
+      - cargo clean
+
+  loc:
+    desc: Count lines of code with tokei
+    cmds:
+      - tokei --exclude target
+
+  # ─── Production Pipeline (thin wrappers around scripts/) ────────────
+
+  render:
+    desc: "Render deck to MP4 — forward all args to scripts/render.sh"
+    cmds:
+      - ./scripts/render.sh {{.CLI_ARGS}}
+
+  render:fast:
+    desc: "Quick render — no transitions, lower DPI"
+    cmds:
+      - ./scripts/render-fast.sh {{.CLI_ARGS}}

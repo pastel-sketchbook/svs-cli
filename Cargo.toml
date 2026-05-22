@@ -1,0 +1,30 @@
+[package]
+name = "svs-cli"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+description = "Automated SlideVoice video production CLI: slides → notes → narration → MP4."
+license = "MIT"
+
+[[bin]]
+name = "svs"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0.102"
+base64 = "0.22.1"
+clap = { version = "4.6", features = ["derive", "env"] }
+indicatif = "0.18.4"
+mime_guess = "2.0.5"
+reqwest = { version = "0.13.3", default-features = false, features = ["json", "rustls", "gzip", "query"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+tempfile = "3.27.0"
+tokio = { version = "1.52.3", features = ["macros", "rt-multi-thread", "fs", "process", "sync", "time"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
