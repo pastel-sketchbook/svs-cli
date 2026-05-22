@@ -1,13 +1,15 @@
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
-use crate::ffmpeg::EncodeOptions;
-use crate::gemini::default_notes_model;
+use crate::ffmpeg::{EncodeOptions, FfmpegService};
+use crate::gemini::{GeminiClient, default_notes_model};
 use crate::models::{Transition, Voice};
-use crate::pipeline::{self, RenderOptions};
+use crate::pdf::PdfService;
+use crate::pipeline::{self, Adapters, RenderOptions};
 
 /// Automated SlideVoice video production CLI.
 ///
@@ -177,7 +179,6 @@ async fn render(args: RenderArgs) -> Result<()> {
         notes_model: args
             .notes_model
             .unwrap_or_else(|| default_notes_model().to_string()),
-        api_key: args.api_key,
         gemini_concurrency: args.gemini_concurrency,
         encode_concurrency: args.encode_concurrency,
         encode: EncodeOptions {
@@ -193,7 +194,13 @@ async fn render(args: RenderArgs) -> Result<()> {
         regenerate_audio: args.regenerate_audio,
     };
 
-    let path = pipeline::render(opts).await?;
+    let adapters = Adapters {
+        gemini: Arc::new(GeminiClient::new(args.api_key)?),
+        ffmpeg: Arc::new(FfmpegService),
+        pdf: PdfService,
+    };
+
+    let path = pipeline::render(opts, adapters).await?;
     println!("✓ wrote {}", path.display());
     Ok(())
 }

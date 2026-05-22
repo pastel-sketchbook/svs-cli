@@ -263,3 +263,35 @@ async fn run_ffmpeg(ffmpeg: &Path, args: &[&str]) -> Result<()> {
     }
     Ok(())
 }
+
+// ─── Adapter trait impl ──────────────────────────────────────────────
+
+/// Default FFmpeg adapter using the system `ffmpeg` binary.
+#[derive(Debug, Clone, Copy)]
+pub struct FfmpegService;
+
+impl crate::adapters::FfmpegAdapter for FfmpegService {
+    async fn locate(&self) -> Result<PathBuf> {
+        locate_ffmpeg().await
+    }
+
+    async fn encode_segment(
+        &self,
+        ffmpeg: &Path,
+        opts: EncodeOptions,
+        seg: &SegmentInput,
+    ) -> Result<()> {
+        encode_segment(ffmpeg, opts, seg).await
+    }
+
+    async fn assemble(
+        &self,
+        ffmpeg: &Path,
+        segments: &[SegmentInput],
+        work_dir: &Path,
+        output_path: &Path,
+        opts: EncodeOptions,
+    ) -> Result<()> {
+        assemble(ffmpeg, segments, work_dir, output_path, opts).await
+    }
+}

@@ -112,3 +112,25 @@ async fn ensure_tool_available(name: &str, args: &[&str]) -> Result<()> {
         ),
     }
 }
+
+// ─── Adapter trait impl ──────────────────────────────────────────────
+
+/// Default PDF adapter using the system `pdftoppm` binary.
+#[derive(Debug, Clone, Copy)]
+pub struct PdfService;
+
+impl crate::adapters::PdfAdapter for PdfService {
+    async fn rasterise(
+        &self,
+        pdf_path: &Path,
+        out_dir: &Path,
+        dpi: u32,
+        jpeg_quality: u32,
+    ) -> Result<Vec<PathBuf>> {
+        rasterise_pdf(pdf_path, out_dir, dpi, jpeg_quality).await
+    }
+
+    fn discover_images(&self, dir: &Path) -> Result<Vec<PathBuf>> {
+        discover_slide_images(dir)
+    }
+}

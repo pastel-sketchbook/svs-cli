@@ -1,17 +1,17 @@
 //! End-to-end render pipeline: slides → Gemini notes → Gemini TTS → MP4.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 use indicatif::{ProgressBar, ProgressStyle};
 use tokio::sync::Semaphore;
 use tracing::{info, warn};
 
+use crate::adapters::{FfmpegAdapter, GeminiAdapter, PdfAdapter};
 use crate::audio::{pcm_duration_ms, pcm_to_wav};
-use crate::ffmpeg::{self, EncodeOptions, SegmentInput};
-use crate::gemini::GeminiClient;
+use crate::ffmpeg::{EncodeOptions, SegmentInput};
 use crate::models::{Transition, Voice};
-use crate::pdf;
 
 #[derive(Debug, Clone)]
 pub struct RenderOptions {
@@ -21,7 +21,6 @@ pub struct RenderOptions {
     pub voice: Voice,
     pub transition: Transition,
     pub notes_model: String,
-    pub api_key: String,
     pub gemini_concurrency: usize,
     pub encode_concurrency: usize,
     pub encode: EncodeOptions,
@@ -32,7 +31,19 @@ pub struct RenderOptions {
     pub regenerate_audio: bool,
 }
 
-pub async fn render(opts: RenderOptions) -> Result<PathBuf> {
+/// Injected adapters for external dependencies.
+pub struct Adapters<G, F, P> {
+    pub gemini: Arc<G>,
+    pub ffmpeg: Arc<F>,
+    pub pdf: P,
+}
+
+pub async fn render<G, F, P>(opts: RenderOptions, adapters: Adapters<G, F, P>) -> Result<PathBuf>
+where
+    G: GeminiAdapter + 'static,
+    F: FfmpegAdapter + Send + Sync + 'static,
+    P: PdfAdapter,
+{
     tokio::fs::create_dir_all(&opts.cache_dir)
         .await
         .with_context(|| format!("creating cache dir {}", opts.cache_dir.display()))?;
@@ -45,15 +56,13 @@ pub async fn render(opts: RenderOptions) -> Result<PathBuf> {
     }
 
     // 1. Resolve slide images (PDF or directory).
-    let slide_images = resolve_slides(&opts.input, &images_dir, &opts).await?;
+    let slide_images = resolve_slides(&opts.input, &images_dir, &opts, &adapters.pdf).await?;
     info!(count = slide_images.len(), "resolved slides");
-
-    let gemini = GeminiClient::new(opts.api_key.clone())?;
 
     // 2. Notes per slide (cached on disk as .txt sidecars).
     let notes_pb = make_pb(slide_images.len() as u64, "notes");
     let notes = generate_notes(
-        &gemini,
+        &adapters.gemini,
         &slide_images,
         &notes_dir,
         &opts.notes_model,
@@ -67,7 +76,7 @@ pub async fn render(opts: RenderOptions) -> Result<PathBuf> {
     // 3. TTS audio per slide (cached as .wav).
     let audio_pb = make_pb(slide_images.len() as u64, "audio");
     let audio = generate_audio(
-        &gemini,
+        &adapters.gemini,
         &notes,
         &audio_dir,
         opts.voice,
@@ -79,7 +88,7 @@ pub async fn render(opts: RenderOptions) -> Result<PathBuf> {
     audio_pb.finish_with_message("audio ready");
 
     // 4. Encode per-slide MP4 segments in parallel.
-    let ffmpeg_bin = ffmpeg::locate_ffmpeg().await?;
+    let ffmpeg_bin = adapters.ffmpeg.locate().await?;
     let segments: Vec<SegmentInput> = slide_images
         .iter()
         .enumerate()
@@ -96,6 +105,7 @@ pub async fn render(opts: RenderOptions) -> Result<PathBuf> {
 
     let encode_pb = make_pb(segments.len() as u64, "encode");
     encode_all(
+        &adapters.ffmpeg,
         &ffmpeg_bin,
         &segments,
         opts.encode,
@@ -110,14 +120,10 @@ pub async fn render(opts: RenderOptions) -> Result<PathBuf> {
     if let Some(parent) = opts.output.parent() {
         tokio::fs::create_dir_all(parent).await.ok();
     }
-    ffmpeg::assemble(
-        &ffmpeg_bin,
-        &segments,
-        &segments_dir,
-        &opts.output,
-        opts.encode,
-    )
-    .await?;
+    adapters
+        .ffmpeg
+        .assemble(&ffmpeg_bin, &segments, &segments_dir, &opts.output, opts.encode)
+        .await?;
 
     if !opts.keep_cache {
         // Keep notes + audio (cheap, user value) but drop the heavy
@@ -132,13 +138,14 @@ async fn resolve_slides(
     input: &Path,
     images_dir: &Path,
     opts: &RenderOptions,
+    pdf: &impl PdfAdapter,
 ) -> Result<Vec<PathBuf>> {
     let meta = tokio::fs::metadata(input)
         .await
         .with_context(|| format!("stat {}", input.display()))?;
 
     if meta.is_dir() {
-        return pdf::discover_slide_images(input);
+        return pdf.discover_images(input);
     }
 
     if meta.is_file() {
@@ -150,11 +157,12 @@ async fn resolve_slides(
         if ext == "pdf" {
             // If we already rasterised this PDF and the cache is intact,
             // reuse it.
-            if let Ok(cached) = pdf::discover_slide_images(images_dir) {
+            if let Ok(cached) = pdf.discover_images(images_dir) {
                 info!(count = cached.len(), "reusing cached PDF rasterisation");
                 return Ok(cached);
             }
-            return pdf::rasterise_pdf(input, images_dir, opts.pdf_dpi, opts.pdf_jpeg_quality)
+            return pdf
+                .rasterise(input, images_dir, opts.pdf_dpi, opts.pdf_jpeg_quality)
                 .await;
         }
         bail!(
@@ -171,8 +179,8 @@ struct AudioOutput {
     duration_ms: u64,
 }
 
-async fn generate_notes(
-    gemini: &GeminiClient,
+async fn generate_notes<G: GeminiAdapter + 'static>(
+    gemini: &Arc<G>,
     slide_images: &[PathBuf],
     notes_dir: &Path,
     notes_model: &str,
@@ -186,7 +194,7 @@ async fn generate_notes(
 
     for (i, image) in slide_images.iter().enumerate() {
         let sem = sem.clone();
-        let gemini = gemini.clone();
+        let gemini = Arc::clone(gemini);
         let notes_dir = notes_dir.to_path_buf();
         let notes_model = notes_model.to_string();
         let image = image.clone();
@@ -215,8 +223,8 @@ async fn generate_notes(
     Ok(notes)
 }
 
-async fn generate_audio(
-    gemini: &GeminiClient,
+async fn generate_audio<G: GeminiAdapter + 'static>(
+    gemini: &Arc<G>,
     notes: &[String],
     audio_dir: &Path,
     voice: Voice,
@@ -230,7 +238,7 @@ async fn generate_audio(
 
     for (i, note) in notes.iter().enumerate() {
         let sem = sem.clone();
-        let gemini = gemini.clone();
+        let gemini = Arc::clone(gemini);
         let audio_dir = audio_dir.to_path_buf();
         let note = note.clone();
         let pb = pb.clone();
@@ -282,8 +290,9 @@ async fn generate_audio(
     Ok(outputs.into_iter().map(Option::unwrap).collect())
 }
 
-async fn encode_all(
-    ffmpeg: &Path,
+async fn encode_all<F: FfmpegAdapter + Send + Sync + 'static>(
+    ffmpeg_adapter: &Arc<F>,
+    ffmpeg_bin: &Path,
     segments: &[SegmentInput],
     opts: EncodeOptions,
     concurrency: usize,
@@ -293,7 +302,8 @@ async fn encode_all(
     let mut handles = Vec::with_capacity(segments.len());
     for seg in segments {
         let sem = sem.clone();
-        let ffmpeg = ffmpeg.to_path_buf();
+        let ffmpeg_adapter = Arc::clone(ffmpeg_adapter);
+        let ffmpeg_bin = ffmpeg_bin.to_path_buf();
         let pb = pb.clone();
         let seg = SegmentInput {
             index: seg.index,
@@ -305,7 +315,7 @@ async fn encode_all(
         };
         handles.push(tokio::spawn(async move {
             let _permit = sem.acquire_owned().await.unwrap();
-            ffmpeg::encode_segment(&ffmpeg, opts, &seg).await?;
+            ffmpeg_adapter.encode_segment(&ffmpeg_bin, opts, &seg).await?;
             pb.inc(1);
             Ok::<(), anyhow::Error>(())
         }));

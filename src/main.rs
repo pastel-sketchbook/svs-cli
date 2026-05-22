@@ -3,6 +3,7 @@
 use anyhow::Result;
 use clap::Parser;
 
+mod adapters;
 mod audio;
 mod cli;
 mod config;
