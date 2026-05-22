@@ -6,11 +6,18 @@ use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
+use crate::config::PROMPTS;
 use crate::models::Voice;
 
 const GEMINI_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
-pub const DEFAULT_NOTES_MODEL: &str = "gemini-3.5-flash-preview";
-pub const TTS_MODEL: &str = "gemini-2.5-flash-preview-tts";
+
+pub fn default_notes_model() -> &'static str {
+    &PROMPTS.notes_model
+}
+
+pub fn tts_model() -> &'static str {
+    &PROMPTS.tts_model
+}
 
 #[derive(Debug, Clone)]
 pub struct GeminiClient {
@@ -40,20 +47,14 @@ impl GeminiClient {
         notes_model: &str,
     ) -> Result<String> {
         let greeting_rule = if is_first_slide {
-            "Start the script with a brief, warm 'Welcome' message suitable for the opening of a presentation."
+            &PROMPTS.greeting_first
         } else {
-            "DO NOT use the word 'Welcome' or any opening greetings. Do not start with generic phrases like 'Today', 'In this slide', 'On this slide', or 'Let's'. Start directly with the slide's specific content, and vary the opening sentence across slides."
+            &PROMPTS.greeting_rest
         };
 
-        let prompt = format!(
-            "Analyze this slide image carefully:\n\
-             1. Detect the primary language used on the slide.\n\
-             2. Write a polished, professional presenter script in that EXACT SAME language.\n\
-             3. CRITICAL: Ensure the script has absolutely ZERO typos and perfect grammar.\n\
-             4. GREETING RULE: {greeting_rule}\n\
-             5. Avoid repetitive presenter openers across the deck; each slide should begin with the most specific idea visible on that slide.\n\
-             6. Return ONLY the spoken text itself."
-        );
+        let prompt = PROMPTS
+            .notes_prompt
+            .replace("{greeting_rule}", greeting_rule);
 
         let body = json!({
             "contents": [{
@@ -88,9 +89,11 @@ impl GeminiClient {
             bail!("cannot synthesize empty text");
         }
 
+        let tts_text = PROMPTS.tts_prompt.replace("{text}", text);
+
         let body = json!({
             "contents": [{
-                "parts": [{"text": format!("Speak the following text exactly: \"{text}\"")}],
+                "parts": [{"text": tts_text}],
             }],
             "generationConfig": {
                 "responseModalities": ["AUDIO"],
@@ -102,7 +105,8 @@ impl GeminiClient {
             }
         });
 
-        let url = format!("{GEMINI_BASE_URL}/models/{TTS_MODEL}:generateContent");
+        let tts_model = tts_model();
+        let url = format!("{GEMINI_BASE_URL}/models/{tts_model}:generateContent");
         let resp = self
             .http
             .post(&url)

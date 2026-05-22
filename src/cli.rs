@@ -1,10 +1,11 @@
+use std::io::Write;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
 use crate::ffmpeg::EncodeOptions;
-use crate::gemini::DEFAULT_NOTES_MODEL;
+use crate::gemini::default_notes_model;
 use crate::models::{Transition, Voice};
 use crate::pipeline::{self, RenderOptions};
 
@@ -23,10 +24,17 @@ pub struct Cli {
 #[derive(Subcommand, Debug)]
 enum Command {
     /// Render the full pipeline: slides → notes → narration → MP4.
+    ///
+    /// Usage: svs render <INPUT> [OPTIONS]
+    ///
+    /// Examples:
+    ///   svs render slides.pdf
+    ///   svs render ./slide-images/ --voice kore --transition fade
     Render(RenderArgs),
 }
 
 #[derive(Parser, Debug)]
+#[allow(clippy::struct_excessive_bools)]
 struct RenderArgs {
     /// Input: a PDF file, or a directory of slide images (jpg/png/webp).
     input: PathBuf,
@@ -53,8 +61,8 @@ struct RenderArgs {
     transition: Transition,
 
     /// Gemini vision model used for note extraction.
-    #[arg(long, default_value = DEFAULT_NOTES_MODEL)]
-    notes_model: String,
+    #[arg(long)]
+    notes_model: Option<String>,
 
     /// Output video width in pixels.
     #[arg(long, default_value_t = 1920)]
@@ -95,6 +103,14 @@ struct RenderArgs {
     /// Force regeneration of cached audio.
     #[arg(long)]
     regenerate_audio: bool,
+
+    /// Resume a previous incomplete render without prompting.
+    #[arg(long, conflicts_with = "clear")]
+    resume: bool,
+
+    /// Clear existing cache and start fresh without prompting.
+    #[arg(long, conflicts_with = "resume")]
+    clear: bool,
 }
 
 fn default_encode_concurrency() -> usize {
@@ -129,13 +145,38 @@ async fn render(args: RenderArgs) -> Result<()> {
         .cache_dir
         .unwrap_or_else(|| parent.join(format!("{stem}.svs-cache")));
 
+    // Handle resume/clear logic when cache already exists.
+    if cache_dir.exists() {
+        let has_content = std::fs::read_dir(&cache_dir).is_ok_and(|mut d| d.next().is_some());
+
+        if has_content {
+            if args.clear {
+                tracing::info!("clearing existing cache");
+                tokio::fs::remove_dir_all(&cache_dir).await.ok();
+            } else if !args.resume {
+                // Interactive prompt.
+                let choice = prompt_resume_or_clear(&cache_dir)?;
+                if choice == CacheChoice::Clear {
+                    tracing::info!("clearing existing cache");
+                    tokio::fs::remove_dir_all(&cache_dir).await.ok();
+                } else {
+                    tracing::info!("resuming from existing cache");
+                }
+            } else {
+                tracing::info!("resuming from existing cache");
+            }
+        }
+    }
+
     let opts = RenderOptions {
         input,
         output,
         cache_dir,
         voice: args.voice,
         transition: args.transition,
-        notes_model: args.notes_model,
+        notes_model: args
+            .notes_model
+            .unwrap_or_else(|| default_notes_model().to_string()),
         api_key: args.api_key,
         gemini_concurrency: args.gemini_concurrency,
         encode_concurrency: args.encode_concurrency,
@@ -155,4 +196,28 @@ async fn render(args: RenderArgs) -> Result<()> {
     let path = pipeline::render(opts).await?;
     println!("✓ wrote {}", path.display());
     Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CacheChoice {
+    Resume,
+    Clear,
+}
+
+fn prompt_resume_or_clear(cache_dir: &std::path::Path) -> Result<CacheChoice> {
+    eprintln!("\n  Existing cache found: {}\n", cache_dir.display());
+    eprintln!("  [r] Resume previous production");
+    eprintln!("  [c] Clear cache and start fresh");
+    eprint!("\n  Choice [r/c] (default: r): ");
+    std::io::stderr().flush()?;
+
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input)?;
+    let trimmed = input.trim().to_ascii_lowercase();
+
+    if trimmed == "c" || trimmed == "clear" {
+        Ok(CacheChoice::Clear)
+    } else {
+        Ok(CacheChoice::Resume)
+    }
 }

@@ -1,0 +1,23 @@
+// SlideVoice Studio CLI — prompts and model configuration.
+//
+// Edit this file to tweak Gemini prompts or switch models without
+// recompiling. The binary embeds this at compile time via include_str!.
+(
+    // ─── Models ──────────────────────────────────────────────────────
+    notes_model: "gemini-2.5-flash",
+    tts_model: "gemini-2.5-flash-preview-tts",
+
+    // ─── Notes extraction prompt ─────────────────────────────────────
+    // {greeting_rule} is substituted at runtime.
+    notes_prompt: "Analyze this slide image carefully:\n1. Detect the primary language used on the slide.\n2. Write a polished, professional presenter script in that EXACT SAME language.\n3. CRITICAL: Ensure the script has absolutely ZERO typos and perfect grammar.\n4. GREETING RULE: {greeting_rule}\n5. Avoid repetitive presenter openers across the deck; each slide should begin with the most specific idea visible on that slide.\n6. Return ONLY the spoken text itself.",
+
+    // Greeting rule for the first slide.
+    greeting_first: "Start the script with a brief, warm 'Welcome' message suitable for the opening of a presentation.",
+
+    // Greeting rule for subsequent slides.
+    greeting_rest: "DO NOT use the word 'Welcome' or any opening greetings. Do not start with generic phrases like 'Today', 'In this slide', 'On this slide', or 'Let's'. Start directly with the slide's specific content, and vary the opening sentence across slides.",
+
+    // ─── TTS prompt ──────────────────────────────────────────────────
+    // {text} is substituted at runtime.
+    tts_prompt: "Speak the following text exactly: \"{text}\"",
+)

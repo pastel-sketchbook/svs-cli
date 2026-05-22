@@ -48,9 +48,10 @@ tasks:
       - cargo run --quiet -- {{.CLI_ARGS}}
 
   install:
-    desc: Install the `svs` binary into ~/.cargo/bin
+    desc: Build release and install `svs` binary into ~/bin/
     cmds:
-      - cargo install --path . --locked
+      - cargo build --release
+      - cp target/release/svs ~/bin/svs
 
   check:all:
     desc: Format, lint, and test in one pass
@@ -68,6 +69,28 @@ tasks:
     desc: Count lines of code with tokei
     cmds:
       - tokei --exclude target
+
+  # ─── Versioning ─────────────────────────────────────────────────────
+
+  version:patch:
+    desc: Bump patch version (0.1.0 → 0.1.1)
+    cmds:
+      - ./scripts/version-bump.sh patch
+
+  version:minor:
+    desc: Bump minor version (0.1.0 → 0.2.0)
+    cmds:
+      - ./scripts/version-bump.sh minor
+
+  version:major:
+    desc: Bump major version (0.1.0 → 1.0.0)
+    cmds:
+      - ./scripts/version-bump.sh major
+
+  version:tag:
+    desc: Sync VERSION to Cargo.toml, commit, and create git tag
+    cmds:
+      - ./scripts/version-tag.sh
 
   # ─── Production Pipeline (thin wrappers around scripts/) ────────────
 

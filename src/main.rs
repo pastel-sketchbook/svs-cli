@@ -5,6 +5,7 @@ use clap::Parser;
 
 mod audio;
 mod cli;
+mod config;
 mod ffmpeg;
 mod gemini;
 mod models;
