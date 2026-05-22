@@ -149,6 +149,8 @@ async fn render(args: RenderArgs) -> Result<()> {
 
     // Handle resume/clear logic when cache already exists.
     if cache_dir.exists() {
+        // Synchronous read_dir is acceptable here: it's a single non-blocking
+        // metadata check before any heavy async work begins.
         let has_content = std::fs::read_dir(&cache_dir).is_ok_and(|mut d| d.next().is_some());
 
         if has_content {

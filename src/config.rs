@@ -17,5 +17,6 @@ pub struct PromptsConfig {
 }
 
 pub static PROMPTS: LazyLock<PromptsConfig> = LazyLock::new(|| {
+    // RON is embedded at compile time; parse failure indicates a build-time bug.
     ron::from_str(CONFIG_STR).expect("failed to parse prompts.ron — check syntax")
 });

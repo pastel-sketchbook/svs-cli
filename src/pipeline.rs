@@ -122,7 +122,13 @@ where
     }
     adapters
         .ffmpeg
-        .assemble(&ffmpeg_bin, &segments, &segments_dir, &opts.output, opts.encode)
+        .assemble(
+            &ffmpeg_bin,
+            &segments,
+            &segments_dir,
+            &opts.output,
+            opts.encode,
+        )
         .await?;
 
     if !opts.keep_cache {
@@ -200,6 +206,7 @@ async fn generate_notes<G: GeminiAdapter + 'static>(
         let image = image.clone();
         let pb = pb.clone();
         handles.push(tokio::spawn(async move {
+            // Semaphore is Arc-held and never closed; acquire cannot fail.
             let _permit = sem.acquire_owned().await.unwrap();
             let cache_path = notes_dir.join(format!("slide_{i:04}.txt"));
             if !regenerate && let Ok(existing) = tokio::fs::read_to_string(&cache_path).await {
@@ -243,6 +250,7 @@ async fn generate_audio<G: GeminiAdapter + 'static>(
         let note = note.clone();
         let pb = pb.clone();
         handles.push(tokio::spawn(async move {
+            // Semaphore is Arc-held and never closed; acquire cannot fail.
             let _permit = sem.acquire_owned().await.unwrap();
             let wav_path = audio_dir.join(format!("slide_{i:04}.wav"));
             let pcm_path = audio_dir.join(format!("slide_{i:04}.pcm"));
@@ -314,8 +322,11 @@ async fn encode_all<F: FfmpegAdapter + Send + Sync + 'static>(
             transition: seg.transition,
         };
         handles.push(tokio::spawn(async move {
+            // Semaphore is Arc-held and never closed; acquire cannot fail.
             let _permit = sem.acquire_owned().await.unwrap();
-            ffmpeg_adapter.encode_segment(&ffmpeg_bin, opts, &seg).await?;
+            ffmpeg_adapter
+                .encode_segment(&ffmpeg_bin, opts, &seg)
+                .await?;
             pb.inc(1);
             Ok::<(), anyhow::Error>(())
         }));
@@ -329,6 +340,7 @@ async fn encode_all<F: FfmpegAdapter + Send + Sync + 'static>(
 fn make_pb(total: u64, label: &str) -> ProgressBar {
     let pb = ProgressBar::new(total);
     pb.set_style(
+        // Template string is a compile-time constant; parsing cannot fail.
         ProgressStyle::with_template("{prefix:>8} [{bar:30.cyan/blue}] {pos:>3}/{len:3} {msg}")
             .unwrap()
             .progress_chars("=>-"),

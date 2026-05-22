@@ -135,6 +135,7 @@ async fn concat_copy(
     let mut body = String::new();
     for s in segments {
         use std::fmt::Write;
+        // writeln! to String is infallible.
         writeln!(
             body,
             "file '{}'",
