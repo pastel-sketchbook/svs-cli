@@ -12,6 +12,7 @@ mod gemini;
 mod models;
 mod pdf;
 mod pipeline;
+mod util;
 
 use cli::Cli;
 

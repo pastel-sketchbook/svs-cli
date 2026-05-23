@@ -203,7 +203,7 @@ async fn render(args: RenderArgs) -> Result<()> {
     };
 
     let path = pipeline::render(opts, adapters).await?;
-    println!("✓ wrote {}", path.display());
+    println!("✓ wrote {}", crate::util::display_path(&path));
     Ok(())
 }
 

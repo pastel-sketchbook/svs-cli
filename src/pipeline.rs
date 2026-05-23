@@ -52,7 +52,9 @@ where
     let audio_dir = opts.cache_dir.join("audio");
     let segments_dir = opts.cache_dir.join("segments");
     for d in [&images_dir, &notes_dir, &audio_dir, &segments_dir] {
-        tokio::fs::create_dir_all(d).await?;
+        tokio::fs::create_dir_all(d)
+            .await
+            .with_context(|| format!("creating {}", d.display()))?;
     }
 
     // 1. Resolve slide images (PDF or directory).
@@ -116,7 +118,7 @@ where
     encode_pb.finish_with_message("segments encoded");
 
     // 5. Assemble into a final MP4.
-    info!(output = %opts.output.display(), "assembling final video");
+    info!(output = %crate::util::display_path(&opts.output), "assembling final video");
     if let Some(parent) = opts.output.parent() {
         tokio::fs::create_dir_all(parent).await.ok();
     }
@@ -216,8 +218,13 @@ async fn generate_notes<G: GeminiAdapter + 'static>(
             let bytes = tokio::fs::read(&image)
                 .await
                 .with_context(|| format!("read {}", image.display()))?;
-            let text = gemini.extract_notes(&bytes, i == 0, &notes_model).await?;
-            tokio::fs::write(&cache_path, &text).await?;
+            let text = gemini
+                .extract_notes(&bytes, i == 0, &notes_model)
+                .await
+                .with_context(|| format!("generating notes for slide {i}"))?;
+            tokio::fs::write(&cache_path, &text)
+                .await
+                .with_context(|| format!("caching notes to {}", cache_path.display()))?;
             pb.inc(1);
             Ok((i, text))
         }));
@@ -273,13 +280,20 @@ async fn generate_audio<G: GeminiAdapter + 'static>(
                 ));
             }
 
-            let pcm = gemini.generate_speech(&note, voice).await?;
+            let pcm = gemini
+                .generate_speech(&note, voice)
+                .await
+                .with_context(|| format!("generating speech for slide {i}"))?;
             let duration_ms = pcm_duration_ms(&pcm);
             if duration_ms == 0 {
                 warn!(slide = i, "Gemini returned empty audio");
             }
-            tokio::fs::write(&pcm_path, &pcm).await?;
-            tokio::fs::write(&wav_path, pcm_to_wav(&pcm)).await?;
+            tokio::fs::write(&pcm_path, &pcm)
+                .await
+                .with_context(|| format!("writing {}", pcm_path.display()))?;
+            tokio::fs::write(&wav_path, pcm_to_wav(&pcm))
+                .await
+                .with_context(|| format!("writing {}", wav_path.display()))?;
             pb.inc(1);
             Ok((
                 i,
@@ -326,7 +340,8 @@ async fn encode_all<F: FfmpegAdapter + Send + Sync + 'static>(
             let _permit = sem.acquire_owned().await.unwrap();
             ffmpeg_adapter
                 .encode_segment(&ffmpeg_bin, opts, &seg)
-                .await?;
+                .await
+                .with_context(|| format!("encoding segment {}", seg.output_path.display()))?;
             pb.inc(1);
             Ok::<(), anyhow::Error>(())
         }));
