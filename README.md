@@ -54,6 +54,12 @@ svs render deck.pdf --clear
 
 # Re-run with cached notes but regenerate audio
 svs render deck.pdf --regenerate-audio
+
+# Replace only the first slide image (from another PDF's first page)
+svs render deck.pdf --replace-slide "1:~/Desktop/new_cover.pdf"
+
+# Remove slide 2 from the deck (produces N-1 slides)
+svs render deck.pdf --remove-slide 2 --resume
 ```
 
 ### Flags
@@ -74,6 +80,8 @@ svs render deck.pdf --regenerate-audio
 | `--resume` | — | Resume without prompting |
 | `--clear` | — | Clear cache without prompting |
 | `--regenerate-notes / --regenerate-audio` | off | Bypass cache |
+| `--replace-slide` | — | Replace slide image by index (`1:path`). Accepts images or PDFs (first page). Repeatable. |
+| `--remove-slide` | — | Remove a slide by index (1-based). Repeatable. |
 | `--keep-cache` | off | Keep segment MP4s after assembly |
 
 ## Resumable Production

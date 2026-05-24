@@ -106,6 +106,16 @@ struct RenderArgs {
     #[arg(long)]
     regenerate_audio: bool,
 
+    /// Replace a slide image by index (1-based). Format: `<index>:<path>`.
+    /// The path may be a JPEG/PNG or a PDF (first page is extracted).
+    /// Can be specified multiple times.
+    #[arg(long, value_name = "INDEX:PATH")]
+    replace_slide: Vec<String>,
+
+    /// Remove slides by index (1-based). Can be specified multiple times.
+    #[arg(long, value_name = "INDEX")]
+    remove_slide: Vec<usize>,
+
     /// Resume a previous incomplete render without prompting.
     #[arg(long, conflicts_with = "clear")]
     resume: bool,
@@ -194,6 +204,8 @@ async fn render(args: RenderArgs) -> Result<()> {
         keep_cache: args.keep_cache,
         regenerate_notes: args.regenerate_notes,
         regenerate_audio: args.regenerate_audio,
+        replace_slides: parse_replace_slides(&args.replace_slide)?,
+        remove_slides: args.remove_slide.iter().map(|i| i.saturating_sub(1)).collect(),
     };
 
     let adapters = Adapters {
@@ -218,10 +230,10 @@ fn prompt_resume_or_clear(cache_dir: &std::path::Path) -> Result<CacheChoice> {
     eprintln!("  [r] Resume previous production");
     eprintln!("  [c] Clear cache and start fresh");
     eprint!("\n  Choice [r/c] (default: r): ");
-    std::io::stderr().flush()?;
+    std::io::stderr().flush().context("flushing stderr")?;
 
     let mut input = String::new();
-    std::io::stdin().read_line(&mut input)?;
+    std::io::stdin().read_line(&mut input).context("reading stdin")?;
     let trimmed = input.trim().to_ascii_lowercase();
 
     if trimmed == "c" || trimmed == "clear" {
@@ -229,4 +241,30 @@ fn prompt_resume_or_clear(cache_dir: &std::path::Path) -> Result<CacheChoice> {
     } else {
         Ok(CacheChoice::Resume)
     }
+}
+
+/// Parse `--replace-slide` values like `1:path/to/image.jpg` into (0-based index, PathBuf).
+fn parse_replace_slides(raw: &[String]) -> Result<Vec<(usize, PathBuf)>> {
+    let mut result = Vec::with_capacity(raw.len());
+    for entry in raw {
+        let (idx_str, path_str) = entry
+            .split_once(':')
+            .with_context(|| format!("invalid --replace-slide format '{entry}': expected INDEX:PATH"))?;
+        let idx: usize = idx_str
+            .trim()
+            .parse()
+            .with_context(|| format!("invalid slide index '{idx_str}' in --replace-slide"))?;
+        if idx == 0 {
+            anyhow::bail!("--replace-slide index is 1-based; got 0");
+        }
+        let path_str = path_str.trim();
+        let path = if path_str.starts_with('~') {
+            let home = std::env::var("HOME").unwrap_or_default();
+            PathBuf::from(path_str.replacen('~', &home, 1))
+        } else {
+            PathBuf::from(path_str)
+        };
+        result.push((idx - 1, path));
+    }
+    Ok(result)
 }

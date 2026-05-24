@@ -43,7 +43,7 @@ pub fn pcm_duration_ms(pcm: &[u8]) -> u64 {
         return 0;
     }
     let samples = pcm.len() / bytes_per_sample;
-    (samples as u64 * 1000) / u64::from(GEMINI_TTS_SAMPLE_RATE)
+    (samples as u64).saturating_mul(1000) / u64::from(GEMINI_TTS_SAMPLE_RATE)
 }
 
 #[cfg(test)]

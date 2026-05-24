@@ -48,7 +48,7 @@ pub async fn rasterise_pdf(
     let mut entries = tokio::fs::read_dir(out_dir)
         .await
         .with_context(|| format!("reading {}", out_dir.display()))?;
-    while let Some(entry) = entries.next_entry().await? {
+    while let Some(entry) = entries.next_entry().await.context("reading directory entry")? {
         let path = entry.path();
         if path.extension().and_then(|s| s.to_str()) == Some("jpg")
             && path

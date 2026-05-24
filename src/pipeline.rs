@@ -29,6 +29,10 @@ pub struct RenderOptions {
     pub keep_cache: bool,
     pub regenerate_notes: bool,
     pub regenerate_audio: bool,
+    /// Slide replacements: Vec of (0-based index, path to replacement image).
+    pub replace_slides: Vec<(usize, PathBuf)>,
+    /// Slides to remove (0-based indices).
+    pub remove_slides: Vec<usize>,
 }
 
 /// Injected adapters for external dependencies.
@@ -58,8 +62,85 @@ where
     }
 
     // 1. Resolve slide images (PDF or directory).
-    let slide_images = resolve_slides(&opts.input, &images_dir, &opts, &adapters.pdf).await?;
+    let mut slide_images = resolve_slides(&opts.input, &images_dir, &opts, &adapters.pdf).await?;
     info!(count = slide_images.len(), "resolved slides");
+
+    // 1b. Apply slide replacements.
+    for (idx, replacement) in &opts.replace_slides {
+        if *idx >= slide_images.len() {
+            bail!(
+                "replace-slide index {} is out of range (deck has {} slides)",
+                idx + 1,
+                slide_images.len()
+            );
+        }
+        let dest = images_dir.join(format!("replaced_{idx:04}.jpg"));
+        let ext = replacement
+            .extension()
+            .and_then(|s| s.to_str())
+            .map(str::to_ascii_lowercase)
+            .unwrap_or_default();
+        if ext == "pdf" {
+            // Rasterise only the first page into a temp dir, then copy.
+            let tmp = opts.cache_dir.join("_replace_tmp");
+            tokio::fs::create_dir_all(&tmp).await.ok();
+            adapters
+                .pdf
+                .rasterise(replacement, &tmp, opts.pdf_dpi, opts.pdf_jpeg_quality)
+                .await
+                .with_context(|| {
+                    format!("rasterising replacement PDF {}", replacement.display())
+                })?;
+            let pages = adapters.pdf.discover_images(&tmp)?;
+            if pages.is_empty() {
+                bail!(
+                    "replacement PDF {} produced no images",
+                    replacement.display()
+                );
+            }
+            tokio::fs::copy(&pages[0], &dest).await.with_context(|| {
+                format!("copying replacement slide to {}", dest.display())
+            })?;
+            let _ = tokio::fs::remove_dir_all(&tmp).await;
+        } else {
+            tokio::fs::copy(replacement, &dest).await.with_context(|| {
+                format!("copying replacement slide {}", replacement.display())
+            })?;
+        }
+        info!(slide = idx + 1, path = %dest.display(), "replaced slide image");
+        slide_images[*idx] = dest;
+
+        // Invalidate cached notes and audio for the replaced slide.
+        let notes_cache = notes_dir.join(format!("slide_{idx:04}.txt"));
+        let audio_wav = audio_dir.join(format!("slide_{idx:04}.wav"));
+        let audio_pcm = audio_dir.join(format!("slide_{idx:04}.pcm"));
+        for f in [&notes_cache, &audio_wav, &audio_pcm] {
+            if tokio::fs::remove_file(f).await.is_ok() {
+                info!(path = %f.display(), "invalidated cache for replaced slide");
+            }
+        }
+    }
+
+    // 1c. Remove slides.
+    if !opts.remove_slides.is_empty() {
+        for &idx in &opts.remove_slides {
+            if idx >= slide_images.len() {
+                bail!(
+                    "remove-slide index {} is out of range (deck has {} slides)",
+                    idx + 1,
+                    slide_images.len()
+                );
+            }
+        }
+        let mut to_remove = opts.remove_slides.clone();
+        to_remove.sort_unstable();
+        to_remove.dedup();
+        for &idx in to_remove.iter().rev() {
+            info!(slide = idx + 1, "removing slide");
+            slide_images.remove(idx);
+        }
+        info!(count = slide_images.len(), "slides after removal");
+    }
 
     // 2. Notes per slide (cached on disk as .txt sidecars).
     let notes_pb = make_pb(slide_images.len() as u64, "notes");
@@ -309,6 +390,7 @@ async fn generate_audio<G: GeminiAdapter + 'static>(
         let (i, out) = h.await.context("audio task panicked")??;
         outputs[i] = Some(out);
     }
+    // All slots are filled: each spawned task writes exactly one index.
     Ok(outputs.into_iter().map(Option::unwrap).collect())
 }
 
