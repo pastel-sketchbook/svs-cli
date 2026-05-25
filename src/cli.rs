@@ -226,7 +226,18 @@ enum CacheChoice {
 }
 
 fn prompt_resume_or_clear(cache_dir: &std::path::Path) -> Result<CacheChoice> {
-    eprintln!("\n  Existing cache found: {}\n", cache_dir.display());
+    let display_path = if let Some(home) = dirs::home_dir() {
+        let cache_str = cache_dir.display().to_string();
+        let home_str = home.display().to_string();
+        if cache_str.starts_with(&home_str) {
+            cache_str.replacen(&home_str, "~", 1)
+        } else {
+            cache_str
+        }
+    } else {
+        cache_dir.display().to_string()
+    };
+    eprintln!("\n  Existing cache found: {}\n", display_path);
     eprintln!("  [r] Resume previous production");
     eprintln!("  [c] Clear cache and start fresh");
     eprint!("\n  Choice [r/c] (default: r): ");
