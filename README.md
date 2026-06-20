@@ -133,4 +133,4 @@ automatically.
 
 ## License
 
-MIT.
+[MIT](LICENSE)
